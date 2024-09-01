@@ -145,14 +145,6 @@ class Request(metaclass=MetaRequest):
             if value is not None or field.required:
                 field.validate(value)
 
-    def __repr__(self):
-        attributes = {
-            name: getattr(self, name)
-            for name in self.__dict__
-            if name[0:2] != '__'
-        }
-        return f'<Class {self.__class__.__name__}: {attributes}>'
-
 
 class MethodRequest(Request):
     account = CharField(required=False, nullable=True)
