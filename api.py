@@ -133,7 +133,7 @@ class MetaRequest(type):
         return type.__new__(cls, name, bases, attrs)
 
 
-class Request(metaclass=MetaRequest):
+class BaseRequest(metaclass=MetaRequest):
     def __init__(self, **kwargs):
         for attribute in self._fields:
             value = kwargs.get(attribute)
@@ -146,7 +146,7 @@ class Request(metaclass=MetaRequest):
                 field.validate(value)
 
 
-class MethodRequest(Request):
+class MethodRequest(BaseRequest):
     account = CharField(required=False, nullable=True)
     login = CharField(required=True, nullable=True)
     token = CharField(required=True, nullable=True)
@@ -240,10 +240,7 @@ def online_score_handler(request, ctx, store):
     )
     code = OK
 
-    ctx['has'] = [
-        field_name for field_name in response._fields
-        if getattr(response, field_name) is not None
-    ]
+    ctx['has'] = [field_name for field_name in response._fields if getattr(response, field_name) is not None]
 
     return {'score': score}, code
 
