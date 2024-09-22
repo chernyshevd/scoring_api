@@ -10,6 +10,46 @@ from argparse import ArgumentParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional
 from scoring import get_interests, get_score
+from store import Store
+
+SALT = "Otus"
+ADMIN_LOGIN = "admin"
+ADMIN_SALT = "42"
+OK = 200
+BAD_REQUEST = 400
+FORBIDDEN = 403
+NOT_FOUND = 404
+INVALID_REQUEST = 422
+INTERNAL_ERROR = 500
+ERRORS = {
+    BAD_REQUEST: "Bad Request",
+    FORBIDDEN: "Forbidden",
+    NOT_FOUND: "Not Found",
+    INVALID_REQUEST: "Invalid Request",
+    INTERNAL_ERROR: "Internal Server Error",
+}
+UNKNOWN = 0
+MALE = 1
+FEMALE = 2
+GENDERS = {
+    UNKNOWN: "unknown",
+    MALE: "male",
+    FEMALE: "female",
+}
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import datetime
+import hashlib
+import json
+import logging
+import uuid
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from optparse import OptionParser
+from typing import Optional
+
+from scoring import get_interests, get_score
+from store import Store
 
 SALT = "Otus"
 ADMIN_LOGIN = "admin"
@@ -39,6 +79,8 @@ GENDERS = {
 
 class BaseField:
     def __init__(self, required: Optional[bool] = False, nullable: Optional[bool] = False) -> None:
+        if not required and not nullable:
+            raise ValueError("Optional field must be nullable")
         self.required = required
         self.nullable = nullable
 
@@ -204,7 +246,7 @@ def clients_interests_handler(request, ctx, store):
     clients_interests = {}
 
     for client_id in response.client_ids:
-        clients_interests[f'client_id{client_id}'] = get_interests('nowhere_store', client_id)
+        clients_interests[f'client_id{client_id}'] = get_interests(store, client_id)
     ctx['nclients'] = len(response.client_ids)
     code = OK
     return clients_interests, code
@@ -270,11 +312,25 @@ def method_handler(request, ctx, store):
     return response, code
 
 
+class StoringHTTPServer(HTTPServer):
+    def __init__(self, *args, storage_address=('localhost', 6379), **kwargs):
+        self.store = Store(storage_address[0], storage_address[1])
+        super(StoringHTTPServer, self).__init__(*args, **kwargs)
+
+    def server_activate(self):
+        self.store.connect()
+        super(StoringHTTPServer, self).server_activate()
+
+    def server_close(self):
+        super(StoringHTTPServer, self).server_close()
+        self.store.disconnect()
+
+
 class MainHTTPHandler(BaseHTTPRequestHandler):
     router = {
         "method": method_handler
     }
-    store = None
+    # store = None
 
     def get_request_id(self, headers):
         return headers.get('HTTP_X_REQUEST_ID', uuid.uuid4().hex)
@@ -301,7 +357,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
                     response, code = self.router[path](
                         {"body": request, "headers": self.headers},
                         context,
-                        self.store
+                        self.server.store
                     )
                 except Exception as e:
                     logging.exception("Unexpected error: %s" % e)
@@ -330,10 +386,13 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("-p", "--port", action="store", type=int, default=8080)
     parser.add_argument("-l", "--log", action="store", default=None)
+    parser.add_argument("--storage-host", action="store", default="localhost")
+    parser.add_argument("--storage-port", action="store", type=int, default=6379)
     args = parser.parse_args()
     logging.basicConfig(filename=args.log, level=logging.INFO,
                         format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
-    server = HTTPServer(("localhost", args.port), MainHTTPHandler)
+    server = StoringHTTPServer(("localhost", args.port), MainHTTPHandler,
+                               storage_address=(args.storage_host, args.storage_port))
     logging.info("Starting server at %s" % args.port)
     try:
         server.serve_forever()
